@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html>
+<body>
+<table>
+	<tr>
+		<td>
+			<canvas id="myCanvas" width="200" height="400"
+			style="border:1px solid #c3c3c3;">
+			Your browser does not support the canvas element.
+			</canvas>
+		</td>
+		<td>
+			<h3>Score</h3>
+			<p id="score">0</p>
+			<h2>Next</h2>
+			<canvas id="next_canvas" width="120" height="120"
+			style="border:1px solid #c3c3c3;">
+			Your browser does not support the canvas element.
+			</canvas>
+			<h2>Hold</h2>
+			<canvas id="hold_canvas" width="120" height="120"
+			style="border:1px solid #c3c3c3;">
+			Your browser does not support the canvas element.
+			</canvas>
+		</td>
+	</tr>
+</table>
+
+<script>
+const blockTypes = {
+    I: 0,
+    J: 1,
+    L: 2,
+    O: 3,
+    T: 4,
+    S: 5,
+    Z: 6
+}
+const rotation = {
+	CW: 0,
+    CCW: 1
+}
+const direction = 
+{
+	UP: 0,
+	DOWN: 1,
+	LEFT: 2,
+	RIGHT: 3
+
+}
+const gameStates = 
+{
+	start: 0,
+	run: 1,
+	gameOver: 2,
+	whiteOutRows: 3, 
+	paused: 4
+
+}
+var canvas = document.getElementById("myCanvas");
+var nextCanvas = document.getElementById("next_canvas");
+var holdCanvas = document.getElementById("hold_canvas");
+var ctx = canvas.getContext("2d");
+var holdCtx = holdCanvas.getContext("2d");
+var nextCtx = nextCanvas.getContext("2d");
+const SQUARE_PIXELS = 20;
+const GRID_HIEGHT = 20;
+const GRID_WIDTH = 10;
+const CIELING = 10;
+const GREEN = "#00FF00";
+const LIGHTGREY = "#D3D3D3";
+const GREY = "#808080";
+const AQUA = '#00FFFF';
+const BLUE = '#0000FF';
+const ORANGE = '#FFA500';
+const YELLOW = '#FFFF00';
+const PURPLE = '#800080';
+const RED = '#FF0000';
+const MAXMOD = 90;
+const startingRow = -1;
+const startingCol = 5;
+const initBlockStates = [
+							{ "origin":[0.5,0.5],
+							  "points":[[0,-1],[0,0],[0,1],[0,2]]},
+							{ "origin":[0,0],
+							  "points":[[-1,0],[0,0],[1,-1],[1,0]]},
+							{ "origin":[0,0],
+							  "points":[[-1,0],[0,0],[1,0],[1,1]]},
+							{ "origin":[0.5,0.5],
+							  "points":[[0,0],[0,1],[1,0],[1,1]]},
+							{ "origin":[0,0],
+							  "points":[[0,-1],[0,0],[0,1],[1,0]]},
+							{ "origin":[0,0],
+							  "points":[[-1,0],[-1,1],[0,-1],[0,0]]},
+							{ "origin":[0,0],
+							  "points":[[-1,-1],[-1,0],[0,0],[0,1]]}
+							
+							];
+//10 wide 20 high * 20 = 200 pixel wide and 400 wide
+//y is first x is second
+//origin block is first on list
+var currBlocks = [[-1,-1],[-1,-1],[-1,-1],[-1,-1]];
+var currOrigin = [-1,-1];
+var currBlockType = blockTypes.I;
+let nextBlockType;
+let holdBlockType;
+//[<y>,<x>,<color>]
+var allBlocks = [];
+var gameState = gameStates.start;
+var gameTick = 0;
+//TODO implement speedup with spacebar
+var speedup = false;
+var mod = 0;
+//TODO implement blocking
+var blocking = false;
+var score = 0;
+let currComplete;
+setInterval(function(){
+	if(blocking || gameState == gameStates.paused)
+	{
+		return;
+	}
+	blocking = true;
+	gameTick = gameTick + 1;
+	if(gameTick % (100 - mod) == 0 || (speedup && gameTick % (Math.floor(25 - (mod / 5))) == 0))
+	{
+		if(gameState == gameStates.gameOver)
+		{
+			blocking = false;
+			return;
+		}
+		if(gameState == gameStates.start)
+		{
+			rot = Math.floor(Math.random() * 4);
+			nextBlockType = Math.floor(Math.random() * 7);
+			drawNext();
+			drawHold();
+			currBlockType = Math.floor(Math.random() * 7);
+			currBlocks = [];
+			currOrigin = [];
+			currBlocks =  JSON.parse(JSON.stringify(initBlockStates[currBlockType].points));
+			currOrigin =  JSON.parse(JSON.stringify(initBlockStates[currBlockType].origin));
+			for(var i = 0;i < currBlocks.length;i++)
+			{
+				currBlocks[i][0] = currBlocks[i][0] + startingRow;
+				currBlocks[i][1] = currBlocks[i][1] + startingCol;
+			}
+			currOrigin[0] = currOrigin[0] + startingRow;
+			currOrigin[1] = currOrigin[1] + startingCol;
+			for(var i = 0;i < rot;i++)
+			{
+				currBlocks = rotate(rotation.CW,currOrigin,currBlocks);
+			}
+			gameState = gameStates.run;
+			draw();
+			blocking = false;
+			return;
+		}
+		if(gameState == gameStates.whiteOutRows)
+		{
+			for(var i = 0;i < currComplete.length;i++)
+			{
+				moveAllBlocksAboveXDownOne(currComplete[i]);
+			}
+			gameState = gameStates.run;
+			blocking = false;
+			draw();
+			return;
+		}
+		else if(canMoveAll(currBlocks,1,0))
+		{
+			currBlocks = moveAll(currBlocks,1,0);
+			draw();
+		}
+		else
+		{
+			for(var i = 0;i < currBlocks.length;i++)
+			{
+				var c = getBlockColor(currBlockType);
+				allBlocks.push([currBlocks[i][0],currBlocks[i][1],c]);
+			}
+			rot = Math.floor(Math.random() * 4);
+			currBlockType = nextBlockType;
+			nextBlockType = Math.floor(Math.random() * 7);
+			drawNext();
+			currBlocks = [];
+			currOrigin = [];
+			currBlocks = JSON.parse(JSON.stringify(initBlockStates[currBlockType].points));
+			currOrigin =  JSON.parse(JSON.stringify(initBlockStates[currBlockType].origin));
+			for(var i = 0;i < currBlocks.length;i++)
+			{
+				currBlocks[i][0] = currBlocks[i][0] + startingRow;
+				currBlocks[i][1] = currBlocks[i][1] + startingCol;
+			}
+			currOrigin[0] = currOrigin[0] + startingRow;
+			currOrigin[1] = currOrigin[1] + startingCol;
+			for(var i = 0;i < rot;i++)
+			{
+				currBlocks = rotate(rotation.CW,currOrigin,currBlocks);
+			}
+			var completed = checkCompleteRows();
+			currComplete = completed;
+			if(completed.length > 0)
+			{
+				if(mod < MAXMOD)
+				{
+					mod+=completed.length;
+				}
+				gameState = gameStates.whiteOutRows;
+				score += 1000 * Math.pow(4 , completed.length - 1);
+				setScore(score);
+			}
+			for(var i = 0 ;i < completed.length;i++)
+			{
+				removeBlocksFromRow(completed[i]);
+			}
+			draw();
+			whiteOutRows(completed);
+			if(isGameOver())
+			{
+				gameState = gameStates.gameOver;
+				setScore("Game Over: " + score);
+			}
+			blocking = false;
+			return;
+		}
+	}
+	blocking = false;
+
+
+},10);
+document.onkeydown = function (e)
+{
+	e = e || window.event;
+	if(blocking)
+	{
+		return;
+	}
+    if(e.keyCode == '80')
+	{
+		if(gameState == gameStates.run)
+		{
+			gameState = gameStates.paused;
+		}
+		else if(gameState == gameStates.paused)
+		{
+			gameState = gameStates.run;
+		}
+	}
+	if(gameState == gameStates.paused)
+	{
+		return;
+	}
+	blocking = true;
+	if(gameState == gameStates.gameOver)
+	{
+		blocking = false;
+		return;
+	}
+	if (e.keyCode == '38') {
+        // up arrow
+		currBlocks = resolveRotation(rotation.CW,currOrigin,currBlocks);
+		draw();
+    }
+    else if (e.keyCode == '40') {
+        // down arrow
+		currBlocks = resolveRotation(rotation.CCW,currOrigin,currBlocks);
+		draw();
+    }
+    else if (e.keyCode == '37') {
+       // left arrow
+	   if(canMoveAll(currBlocks,0,-1))
+	   {
+		   currBlocks = moveAll(currBlocks,0,-1);
+		   draw();
+	   }
+    }
+    else if (e.keyCode == '39') {
+       // right arrow
+	    if(canMoveAll(currBlocks,0 ,1))
+	   {
+		   currBlocks = moveAll(currBlocks,0,1);
+		   draw();
+	   }
+    }
+	else if (e.keyCode == '32')
+	{
+		speedup = true;
+	}
+	else if (e.keyCode == '72')
+	{
+		//H for hold
+		if(typeof holdBlockType === "undefined")
+		{
+			holdBlockType = currBlockType;
+			currBlockType = nextBlockType;
+			nextBlockType = Math.floor(Math.random() * 7);
+		}
+		else
+		{
+			var temp = holdBlockType;
+			holdBlockType = currBlockType;
+			currBlockType = temp;
+		}
+		drawNext();
+		drawHold();
+		currBlocks =  JSON.parse(JSON.stringify(initBlockStates[currBlockType].points));
+		if(currOrigin[0] % 1 == .5 && 
+			JSON.parse(JSON.stringify(initBlockStates[currBlockType].origin))[0] % 1 == 0)
+		{
+			currOrigin[0] -= .5;
+			currOrigin[1] -= .5;
+			for(var i = 0;i < currBlocks.length;i++)
+			{
+				currBlocks[i][0] = currBlocks[i][0] + currOrigin[0];
+				currBlocks[i][1] = currBlocks[i][1] + currOrigin[1];
+			}
+		}
+		else if(currOrigin[0] % 1 == 0 && 
+			JSON.parse(JSON.stringify(initBlockStates[currBlockType].origin))[0] % 1 == .5)
+		{
+			for(var i = 0;i < currBlocks.length;i++)
+			{
+				currBlocks[i][0] = currBlocks[i][0] + currOrigin[0];
+				currBlocks[i][1] = currBlocks[i][1] + currOrigin[1];
+			}
+			currOrigin[0] += .5;
+			currOrigin[1] += .5;
+		}
+		else
+		{
+			for(var i = 0;i < currBlocks.length;i++)
+			{
+				currBlocks[i][0] = currBlocks[i][0] + currOrigin[0];
+				currBlocks[i][1] = currBlocks[i][1] + currOrigin[1];
+			}
+		}
+		currBlocks = resolveRotation(rotation.CW,currOrigin,currBlocks);
+		draw();
+	}
+	blocking = false;
+
+}
+document.onkeyup = function (e)
+{
+	e = e || window.event;
+	if (e.keyCode == '32')
+	{
+		speedup = false;
+	}
+
+}
+function draw()
+{
+	ctx.fillStyle = "#000000"; // black
+	ctx.fillRect(0,0,SQUARE_PIXELS * GRID_WIDTH,SQUARE_PIXELS * GRID_HIEGHT);
+	var c = getBlockColor(currBlockType);
+	for(var i = 0;i < currBlocks.length;i++)
+	{
+		drawSquare(currBlocks[i],c);
+	}
+	for(var i = 0;i < allBlocks.length;i++)
+	{
+		drawSquare([allBlocks[i][0],allBlocks[i][1]],allBlocks[i][2]);
+	}
+}
+function getBlockColor(blockType)
+{
+	switch(blockType)
+	{
+		case blockTypes.I:
+        	return AQUA;
+			break;
+		case blockTypes.J:
+        	return BLUE;
+			break;
+		case blockTypes.L:
+        	return ORANGE;
+			break;
+		case blockTypes.O:
+			return YELLOW;
+			break;
+		case blockTypes.T:
+        	return PURPLE;
+			break;
+		case blockTypes.S:
+        	return GREEN;
+			break;
+		case blockTypes.Z:
+        	return RED;
+			break;
+	}
+}
+function isGameOver()
+{
+	for(var i = 0;i < allBlocks.length;i++)
+	{
+		if(allBlocks[i][0] <= -1)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+function resolveRotation(dir,origin,points)
+{
+	var temp = points;
+	for(var i = 0;i < 4;i++)
+	{
+		temp = rotate(dir,origin,temp);
+		if(canMoveAll(temp,0,0))
+		{
+			return temp;
+		}
+		//check to see if it is colliding with a wall
+		else if(!isAllCollidingWithOtherBlocks(temp))
+		{
+			//see if a wall kick is possible
+			if(canMoveAll(temp,0,1))
+			{
+				return moveAll(temp,0,1);
+			}
+			else if(canMoveAll(temp,0,-1))
+			{
+				return moveAll(temp,0,-1);
+			}
+			if(currBlockType == blockTypes.I)
+			{
+				if(canMoveAll(temp,0,2))
+				{
+					return moveAll(temp,0,2);
+				}
+				else if(canMoveAll(temp,0,-2))
+				{
+					return moveAll(temp,0,-2);
+					
+				}
+			}
+		}
+	}
+}
+function canRotate(dir,origin,points)
+{
+	var temp = rotate(dir,origin,points);
+	if(canMoveAll(temp,0,0))
+	{
+		return true;
+	}
+	return false;
+}
+function rotate(dir,origin,points)
+{
+	let result;
+	if(dir == rotation.CW)
+	{
+		result = rotate90cw(origin,points);
+	}
+	else
+	{
+		result = rotate90ccw(origin,points);
+	}
+	
+	return result;
+}
+function normalize(origin,points)
+{
+	var result=[];
+	for(var i = 0;i < points.length;i++)
+	{
+		result.push([points[i][0] - origin[0],points[i][1] - origin[1]]);
+	}
+	return result;
+}
+function denormalize(origin,points)
+{
+	var result=[];
+	for(var i = 0;i < points.length;i++)
+	{
+		result.push([points[i][0] + origin[0],points[i][1] + origin[1]]);
+	}
+	return result;
+}
+function rotate90cw(origin,points)
+{
+	var result = normalize(origin,points);
+	for(var i = 0;i < result.length;i++)
+	{
+		result[i] = [result[i][1]* -1,result[i][0]];
+	}
+	result = denormalize(origin,result);
+	return result;
+}
+function rotate90ccw(origin,points)
+{
+	var result = normalize(origin,points);
+	for(var i = 0;i < result.length;i++)
+	{
+		result[i] = [result[i][1],result[i][0] * -1];
+	}
+	result = denormalize(origin,result);
+	return result;
+}
+function drawSquare(coor,color)
+{
+	ctx.fillStyle = color;
+	ctx.fillRect(SQUARE_PIXELS * coor[1],20 * coor[0],SQUARE_PIXELS,SQUARE_PIXELS);
+    ctx.fillStyle = GREY;
+    //top
+    ctx.fillRect(SQUARE_PIXELS * coor[1],SQUARE_PIXELS * coor[0],SQUARE_PIXELS,1);
+    //left
+    ctx.fillRect(SQUARE_PIXELS * coor[1],SQUARE_PIXELS * coor[0],1,SQUARE_PIXELS);
+    //bottom
+    ctx.fillRect(SQUARE_PIXELS * coor[1],SQUARE_PIXELS * coor[0] + SQUARE_PIXELS,SQUARE_PIXELS,1);
+	//right
+    ctx.fillRect(SQUARE_PIXELS * coor[1] + SQUARE_PIXELS,SQUARE_PIXELS * coor[0],1,SQUARE_PIXELS);
+}
+function moveAll(points,y,x)
+{
+	var results = [];
+	for(var i = 0;i < points.length;i++)
+	{
+		results.push(move(points[i],y,x));
+	}
+	moveOrigin(y,x);
+	return results;
+}
+function moveOrigin(y,x)
+{
+	currOrigin = [currOrigin[0] + y,currOrigin[1] + x];
+}
+function move(point,y,x)
+{
+	return [point[0] + y,point[1] + x];
+}
+function canMoveAll(points,y,x)
+{
+	var results = true;
+	for(var i = 0;i < points.length;i++)
+	{
+		results = results && canMove(points[i],y,x);
+	}
+	return results;
+}
+function canMove(point,y,x)
+{
+	var tempPoint = move(point,y,x);
+	if(tempPoint[0] < (0 - CIELING) || tempPoint[0] >= GRID_HIEGHT)
+	{
+		return false;
+	}
+	if(tempPoint[1] < 0 || tempPoint[1] >= GRID_WIDTH)
+	{
+		return false;
+	}
+	if(isCollidingWithOtherBlocks(tempPoint))
+	{
+		return false;
+	}
+	return true;
+}
+function isCollidingWithSideWall(point)
+{
+	if(tempPoint[1] < 0 || tempPoint[1] > GRID_WIDTH)
+	{
+		return true;
+	}
+	return false;
+}
+function isAllCollidingWithOtherBlocks(points)
+{
+	for(var i = 0;i < points.length;i++)
+	{
+		isCollidingWithOtherBlocks(points[i]);
+	}
+}
+function isCollidingWithOtherBlocks(point)
+{
+	for(var i = 0;i < allBlocks.length;i++)
+	{
+		if(allBlocks[i][0]  == point[0] && allBlocks[i][1]  == point[1] )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+//returns a list of completed rows.
+function checkCompleteRows()
+{
+	var rows = [];
+	for(var i = 0; i < GRID_HIEGHT;i++)
+	{
+		rows.push(0);
+	}
+	for(var i = 0;i < allBlocks.length;i++)
+	{
+		rows[allBlocks[i][0]]++;
+	}
+	var results = [];
+	for(var i = 0;i < rows.length;i++)
+	{
+		if(rows[i] == GRID_WIDTH)
+		{
+			results.push(i);
+		}
+	}
+	return results;
+}
+function removeBlocksFromRow(row)
+{
+	allBlocks = allBlocks.filter(e => e[0] != row);
+}
+function whiteOutRows(rows)
+{
+	for(var i = 0;i < rows.length;i++)
+	{
+		for(var j = 0;j < GRID_WIDTH;j++)
+		{
+			drawSquare([rows[i],j],'#FFFFFF');
+		}
+	}
+}
+function moveAllBlocksAboveXDownOne(row)
+{
+	for(var i = 0;i < allBlocks.length;i++)
+	{
+		if(allBlocks[i][0] < row)
+		{
+			allBlocks[i] = [allBlocks[i][0] + 1,allBlocks[i][1],allBlocks[i][2]];
+		}
+	}
+}
+function setScore(text)
+{
+	document.getElementById("score").innerHTML = text;
+}
+function drawNext()
+{
+	var temp = JSON.parse(JSON.stringify(initBlockStates[nextBlockType].points));
+	for(var i = 0;i < temp.length;i++)
+	{
+		temp[i][0] = temp[i][0] + 2;
+		temp[i][1] = temp[i][1] + 2;
+	}
+	nextCtx.fillStyle = "#000000"; // black
+	nextCtx.fillRect(0,0,SQUARE_PIXELS * GRID_WIDTH,SQUARE_PIXELS * GRID_HIEGHT);
+	var c = getBlockColor(nextBlockType);
+	for(var i = 0;i < temp.length;i++)
+	{
+		nextCtx.fillStyle = getBlockColor(nextBlockType);
+		nextCtx.fillRect(SQUARE_PIXELS * temp[i][1],20 * temp[i][0],SQUARE_PIXELS,SQUARE_PIXELS);
+		nextCtx.fillStyle = GREY;
+		//top
+		nextCtx.fillRect(SQUARE_PIXELS * temp[i][1],SQUARE_PIXELS * temp[i][0],SQUARE_PIXELS,1);
+		//left
+		nextCtx.fillRect(SQUARE_PIXELS * temp[i][1],SQUARE_PIXELS * temp[i][0],1,SQUARE_PIXELS);
+		//bottom
+		nextCtx.fillRect(SQUARE_PIXELS * temp[i][1],SQUARE_PIXELS * temp[i][0] + SQUARE_PIXELS,SQUARE_PIXELS,1);
+		//right
+		nextCtx.fillRect(SQUARE_PIXELS * temp[i][1] + SQUARE_PIXELS,SQUARE_PIXELS * temp[i][0],1,SQUARE_PIXELS);
+	}
+}
+function drawHold()
+{
+	holdCtx.fillStyle = "#000000"; // black
+	holdCtx.fillRect(0,0,SQUARE_PIXELS * GRID_WIDTH,SQUARE_PIXELS * GRID_HIEGHT);
+	if(typeof holdBlockType === "undefined")
+	{
+		return;
+	}
+	var temp = JSON.parse(JSON.stringify(initBlockStates[holdBlockType].points));
+	for(var i = 0;i < temp.length;i++)
+	{
+		temp[i][0] = temp[i][0] + 3;
+		temp[i][1] = temp[i][1] + 3;
+	}
+	var c = getBlockColor(holdBlockType);
+	for(var i = 0;i < temp.length;i++)
+	{
+		holdCtx.fillStyle = getBlockColor(holdBlockType);
+		holdCtx.fillRect(SQUARE_PIXELS * temp[i][1],20 * temp[i][0],SQUARE_PIXELS,SQUARE_PIXELS);
+		holdCtx.fillStyle = GREY;
+		//top
+		holdCtx.fillRect(SQUARE_PIXELS * temp[i][1],SQUARE_PIXELS * temp[i][0],SQUARE_PIXELS,1);
+		//left
+		holdCtx.fillRect(SQUARE_PIXELS * temp[i][1],SQUARE_PIXELS * temp[i][0],1,SQUARE_PIXELS);
+		//bottom
+		holdCtx.fillRect(SQUARE_PIXELS * temp[i][1],SQUARE_PIXELS * temp[i][0] + SQUARE_PIXELS,SQUARE_PIXELS,1);
+		//right
+		holdCtx.fillRect(SQUARE_PIXELS * temp[i][1] + SQUARE_PIXELS,SQUARE_PIXELS * temp[i][0],1,SQUARE_PIXELS);
+	}
+}
+</script>
+
+</body>
+</html>
+
